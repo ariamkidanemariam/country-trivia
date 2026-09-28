@@ -20,9 +20,12 @@ jobs:
         run: |
           curl -fsSL https://opencode.ai/install.sh | bash
           echo "$HOME/.opencode/bin" >> $GITHUB_PATH
+          ls -la "$HOME/.opencode/bin/"
 
       - name: Verify OpenCode installation
-        run: opencode --version
+        run: |
+          export PATH="$HOME/.opencode/bin:$PATH"
+          opencode --version
 
       - name: Review PR with Big Pickle model
         env:
