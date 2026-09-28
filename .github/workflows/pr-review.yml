@@ -18,13 +18,14 @@ jobs:
 
       - name: Setup OpenCode
         run: |
-          curl -fsSL https://opencode.ai/install.sh | bash
+          curl -fsSL https://opencode.ai/install | bash
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          echo "$HOME/bin" >> $GITHUB_PATH
           echo "$HOME/.opencode/bin" >> $GITHUB_PATH
-          ls -la "$HOME/.opencode/bin/"
 
       - name: Verify OpenCode installation
         run: |
-          export PATH="$HOME/.opencode/bin:$PATH"
+          export PATH="$HOME/.local/bin:$HOME/bin:$HOME/.opencode/bin:$PATH"
           opencode --version
 
       - name: Review PR with Big Pickle model
