@@ -82,7 +82,11 @@ class GameProvider extends ChangeNotifier {
   }
 
   Future<void> selectAnswer(int index) async {
-    if (_status != GameStatus.ready || _correctCountry == null) return;
+    if (_status == GameStatus.answeredCorrect ||
+        _status == GameStatus.roundOver ||
+        _correctCountry == null) {
+      return;
+    }
 
     _selectedIndex = index;
     final selected = _options[index];
