@@ -1,0 +1,103 @@
+name: PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup OpenCode
+        run: |
+          curl -fsSL https://opencode.ai/install.sh | bash
+          echo "$HOME/.opencode/bin" >> $GITHUB_PATH
+
+      - name: Verify OpenCode installation
+        run: opencode --version
+
+      - name: Review PR with Big Pickle model
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+        run: |
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          PR_BODY="${{ github.event.pull_request.body }}"
+          PR_AUTHOR="${{ github.event.pull_request.user.login }}"
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+
+          # Get the diff
+          git diff "$BASE_SHA" "$HEAD_SHA" > /tmp/pr_diff.txt
+
+          # Build the review prompt
+          PROMPT=$(cat <<'EOF'
+You are a senior Flutter/Dart code reviewer. Review the following pull request and provide a thorough, constructive review.
+
+## PR Information
+- Title: {{PR_TITLE}}
+- Author: {{PR_AUTHOR}}
+- PR Number: {{PR_NUMBER}}
+
+## PR Description
+{{PR_BODY}}
+
+## Diff
+{{DIFF}}
+
+## Review Guidelines
+1. **Code Quality**: Is the code clean, readable, and well-structured?
+2. **Architecture**: Does it follow the MVVM pattern with Provider as defined in AGENTS.md?
+3. **Dart/Flutter Best Practices**: Are there any anti-patterns or violations of Flutter conventions?
+4. **Error Handling**: Are exceptions and failures handled properly?
+5. **Testing**: Are tests included and do they cover the changes?
+6. **Performance**: Any obvious performance issues?
+7. **Security**: Any security concerns?
+
+## Output Format
+Provide your review in the following format:
+
+### Summary
+Brief 2-3 sentence summary of the PR.
+
+### Strengths
+- List what was done well
+
+### Issues
+- **Critical**: Issues that must be fixed before merging
+- **Suggestions**: Nice-to-have improvements
+- **Questions**: Things that need clarification
+
+### Verdict
+- **Approve**: Ready to merge
+- **Request Changes**: Needs fixes before merging
+- **Comment**: Neither approve nor request changes, just feedback
+
+Be specific — reference file names and line numbers when pointing out issues.
+EOF
+          )
+
+          # Substitute variables
+          PROMPT="${PROMPT//\{\{PR_TITLE\}\}/$PR_TITLE}"
+          PROMPT="${PROMPT//\{\{PR_AUTHOR\}\}/$PR_AUTHOR}"
+          PROMPT="${PROMPT//\{\{PR_NUMBER\}\}/$PR_NUMBER}"
+          PROMPT="${PROMPT//\{\{PR_BODY\}\}/$PR_BODY}"
+          PROMPT="${PROMPT//\{\{DIFF\}\}/$(cat /tmp/pr_diff.txt)}"
+
+          # Run OpenCode with big-pickle model
+          echo "$PROMPT" | opencode run --model opencode/big-pickle --no-stream > /tmp/review_output.txt 2>&1 || true
+
+          # Post review as PR comment
+          REVIEW_BODY=$(cat /tmp/review_output.txt)
+          gh pr comment "$PR_NUMBER" --body "$REVIEW_BODY"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
