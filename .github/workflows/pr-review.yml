@@ -1,5 +1,4 @@
 name: PR Review
-
 on:
   pull_request:
     types: [opened, synchronize, reopened]
@@ -28,76 +27,74 @@ jobs:
       - name: Review PR with Big Pickle model
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          PR_NUMBER=${{ github.event.pull_request.number }}
-          PR_TITLE="${{ github.event.pull_request.title }}"
-          PR_BODY="${{ github.event.pull_request.body }}"
-          PR_AUTHOR="${{ github.event.pull_request.user.login }}"
-          BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-
-          # Get the diff
+          # 1. Get the diff safely
           git diff "$BASE_SHA" "$HEAD_SHA" > /tmp/pr_diff.txt
 
-          # Build the review prompt
-          PROMPT=$(cat <<'EOF'
-You are a senior Flutter/Dart code reviewer. Review the following pull request and provide a thorough, constructive review.
+          # 2. Build the final prompt by safely appending files instead of variable expansion
+          cat <<EOF > /tmp/final_prompt.txt
+          You are a senior Flutter/Dart code reviewer. Review the following pull request and provide a thorough, constructive review.
 
-## PR Information
-- Title: {{PR_TITLE}}
-- Author: {{PR_AUTHOR}}
-- PR Number: {{PR_NUMBER}}
+          ## PR Information
+          - Title: $PR_TITLE
+          - Author: $PR_AUTHOR
+          - PR Number: $PR_NUMBER
 
-## PR Description
-{{PR_BODY}}
+          ## PR Description
+          EOF
 
-## Diff
-{{DIFF}}
+          # Safely append the multi-line PR body and diff files
+          echo "$PR_BODY" >> /tmp/final_prompt.txt
+          
+          cat <<EOF >> /tmp/final_prompt.txt
 
-## Review Guidelines
-1. **Code Quality**: Is the code clean, readable, and well-structured?
-2. **Architecture**: Does it follow the MVVM pattern with Provider as defined in AGENTS.md?
-3. **Dart/Flutter Best Practices**: Are there any anti-patterns or violations of Flutter conventions?
-4. **Error Handling**: Are exceptions and failures handled properly?
-5. **Testing**: Are tests included and do they cover the changes?
-6. **Performance**: Any obvious performance issues?
-7. **Security**: Any security concerns?
+          ## Diff
+          EOF
+          
+          cat /tmp/pr_diff.txt >> /tmp/final_prompt.txt
 
-## Output Format
-Provide your review in the following format:
+          cat <<EOF >> /tmp/final_prompt.txt
 
-### Summary
-Brief 2-3 sentence summary of the PR.
+          ## Review Guidelines
+          1. **Code Quality**: Is the code clean, readable, and well-structured?
+          2. **Architecture**: Does it follow the MVVM pattern with Provider as defined in AGENTS.md?
+          3. **Dart/Flutter Best Practices**: Are there any anti-patterns or violations of Flutter conventions?
+          4. **Error Handling**: Are exceptions and failures handled properly?
+          5. **Testing**: Are tests included and do they cover the changes?
+          6. **Performance**: Any obvious performance issues?
+          7. **Security**: Any security concerns?
 
-### Strengths
-- List what was done well
+          ## Output Format
+          Provide your review in the following format:
 
-### Issues
-- **Critical**: Issues that must be fixed before merging
-- **Suggestions**: Nice-to-have improvements
-- **Questions**: Things that need clarification
+          ### Summary
+          Brief 2-3 sentence summary of the PR.
 
-### Verdict
-- **Approve**: Ready to merge
-- **Request Changes**: Needs fixes before merging
-- **Comment**: Neither approve nor request changes, just feedback
+          ### Strengths
+          - List what was done well
 
-Be specific — reference file names and line numbers when pointing out issues.
-EOF
-          )
+          ### Issues
+          - **Critical**: Issues that must be fixed before merging
+          - **Suggestions**: Nice-to-have improvements
+          - **Questions**: Things that need clarification
 
-          # Substitute variables
-          PROMPT="${PROMPT//\{\{PR_TITLE\}\}/$PR_TITLE}"
-          PROMPT="${PROMPT//\{\{PR_AUTHOR\}\}/$PR_AUTHOR}"
-          PROMPT="${PROMPT//\{\{PR_NUMBER\}\}/$PR_NUMBER}"
-          PROMPT="${PROMPT//\{\{PR_BODY\}\}/$PR_BODY}"
-          PROMPT="${PROMPT//\{\{DIFF\}\}/$(cat /tmp/pr_diff.txt)}"
+          ### Verdict
+          - **Approve**: Ready to merge
+          - **Request Changes**: Needs fixes before merging
+          - **Comment**: Neither approve nor request changes, just feedback
 
-          # Run OpenCode with big-pickle model
-          echo "$PROMPT" | opencode run --model opencode/big-pickle --no-stream > /tmp/review_output.txt 2>&1 || true
+          Be specific — reference file names and line numbers when pointing out issues.
+          EOF
 
-          # Post review as PR comment
-          REVIEW_BODY=$(cat /tmp/review_output.txt)
-          gh pr comment "$PR_NUMBER" --body "$REVIEW_BODY"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 3. Run OpenCode using file input redirection
+          opencode run --model opencode/big-pickle --no-stream < /tmp/final_prompt.txt > /tmp/review_output.txt 2>&1
+
+          # 4. Post review as PR comment
+          gh pr comment "$PR_NUMBER" --body-file /tmp/review_output.txt
